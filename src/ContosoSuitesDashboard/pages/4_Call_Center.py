@@ -17,18 +17,13 @@ st.set_page_config(layout="wide")
 
 @st.cache_data
 def create_transcription_request(audio_file, speech_recognition_language="en-US"):
-    """Transcribe the contents of an audio file. Key assumptions:
-    - The audio file is in WAV format.
-    - The audio file is mono.
-    - The audio file has a sample rate of 16 kHz.
-    - Speech key and region are stored in Streamlit secrets."""
-
+    """Transcribe the contents of an audio file."""
     speech_key = st.secrets["speech"]["key"]
     speech_region = st.secrets["speech"]["region"]
 
-    # Create an instance of a speech config with specified subscription key and service region.
+    # Create an instance of a speech config with the specified subscription key and service region
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
-    speech_config.speech_recognition_language=speech_recognition_language
+    speech_config.speech_recognition_language = speech_recognition_language
 
     # Prepare audio settings for the wave stream
     channels = 1
@@ -40,6 +35,7 @@ def create_transcription_request(audio_file, speech_recognition_language="en-US"
     stream = speechsdk.audio.PushAudioInputStream(stream_format=wave_format)
     audio_config = speechsdk.audio.AudioConfig(stream=stream)
 
+    # Set up transcription session
     transcriber = speechsdk.transcription.ConversationTranscriber(speech_config, audio_config)
     all_results = []
 
@@ -51,28 +47,41 @@ def create_transcription_request(audio_file, speech_recognition_language="en-US"
     def stop_cb(evt):
         print(f'CLOSING on {evt}')
         nonlocal done
-        done= True
+        done = True
 
     # Subscribe to the events fired by the conversation transcriber
     transcriber.transcribed.connect(handle_final_result)
     transcriber.session_started.connect(lambda evt: print(f'SESSION STARTED: {evt}'))
     transcriber.session_stopped.connect(lambda evt: print(f'SESSION STOPPED {evt}'))
     transcriber.canceled.connect(lambda evt: print(f'CANCELED {evt}'))
-    # stop continuous transcription on either session stopped or canceled events
     transcriber.session_stopped.connect(stop_cb)
     transcriber.canceled.connect(stop_cb)
 
+    # Start the transcription process asynchronously
     transcriber.start_transcribing_async()
 
-    # Read the whole wave files at once and stream it to sdk
+    # Read the WAV file
     _, wav_data = wavfile.read(audio_file)
+
+    # Ensure the audio is mono, 16 kHz, 16-bit
+    if wav_data.ndim > 1:
+        wav_data = wav_data.mean(axis=1)  # Convert stereo to mono
+    if wav_data.dtype != 'int16':
+        wav_data = wav_data.astype('int16')  # Ensure 16-bit depth
+    if _ != 16000:
+        raise ValueError("Sample rate should be 16 kHz.")
+
+    # Write the audio data to the stream
     stream.write(wav_data.tobytes())
     stream.close()
-    while not done:
-        time.sleep(.5)
 
+    while not done:
+        time.sleep(0.5)  # Wait for transcription to complete
+
+    # Stop transcription process
     transcriber.stop_transcribing_async()
 
+    return all_results
 
 def make_azure_openai_chat_request(system, call_contents):
     """Create and return a new chat completion request. Key assumptions:
